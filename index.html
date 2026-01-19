@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safari Start Page Pro</title>
+    <style>
+        :root {
+            --text-color: #1d1d1f;
+            --card-bg: rgba(255, 255, 255, 0.75);
+            --accent: #007aff;
+            --danger: #ff3b30;
+            --icon-size: 66px; 
+            --icon-radius: 15px;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+            color: var(--text-color);
+        }
+
+        .backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(35px); -webkit-backdrop-filter: blur(35px);
+            z-index: -1;
+        }
+
+        .container { width: 90%; max-width: 1000px; margin: 60px auto; padding-bottom: 80px; }
+
+        /* 検索バー */
+        .search-container { margin-bottom: 60px; text-align: center; }
+        .search-input {
+            width: 100%; max-width: 600px; padding: 18px 25px;
+            border-radius: 15px; border: none; background: var(--card-bg);
+            font-size: 17px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); outline: none;
+        }
+
+        /* グリッド設定 */
+        .fav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 20px; }
+
+        .fav-item { display: flex; flex-direction: column; align-items: center; position: relative; cursor: grab; }
+        .fav-item.dragging { opacity: 0.4; }
+        .fav-item:active { cursor: grabbing; }
+
+        .fav-icon-box {
+            width: var(--icon-size); height: var(--icon-size);
+            background: var(--card-bg); border-radius: var(--icon-radius);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.07); overflow: hidden;
+            pointer-events: none; /* ボックス自体はクリック無効化してドラッグを優先 */
+        }
+        .fav-icon-box img { width: 54px; height: 54px; object-fit: contain; }
+
+        /* 削除ボタン - 通常は見えないがホバーで表示 */
+        .del-btn {
+            position: absolute; top: -5px; right: 10px;
+            background: var(--danger); color: white; border: none;
+            width: 20px; height: 20px; border-radius: 50%; font-size: 12px;
+            cursor: pointer; display: none; z-index: 10;
+        }
+        .fav-item:hover .del-btn { display: block; }
+
+        .fav-label { margin-top: 10px; font-size: 12px; font-weight: 500; text-align: center; width: 100%; pointer-events: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* 追加ボタン専用スタイル（ドラッグ対象外） */
+        .add-item { cursor: pointer; display: flex; flex-direction: column; align-items: center; }
+
+        /* ニュース・リスト */
+        .section-card { background: var(--card-bg); border-radius: 20px; padding: 10px 20px; backdrop-filter: blur(10px); }
+        .list-item { border-bottom: 1px solid rgba(0,0,0,0.06); padding: 12px 0; }
+        .list-item:last-child { border-bottom: none; }
+        .list-link { text-decoration: none; color: var(--text-color); font-size: 15px; }
+
+        /* 設定・ボタン */
+        .settings-btn { position: fixed; top: 20px; right: 20px; width: 44px; height: 44px; background: var(--card-bg); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; font-size: 20px; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.3); display: none; justify-content: center; align-items: center; z-index: 100; backdrop-filter: blur(8px); }
+        .modal { background: rgba(255,255,255,0.95); padding: 30px; border-radius: 24px; width: 90%; max-width: 400px; }
+        .modal input, .modal select { width: 100%; padding: 12px; margin: 10px 0 20px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 10px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="backdrop"></div>
+    <div class="settings-btn" onclick="openModal('settingsModal')">⚙️</div>
+
+    <div class="container">
+        <div class="search-container">
+            <form id="searchForm" target="_blank">
+                <input type="text" name="q" id="searchInput" class="search-input" placeholder="検索" autocomplete="off">
+            </form>
+        </div>
+
+        <h2>お気に入り <small style="font-weight:normal; font-size:12px; color:#666; margin-left:10px;">(Shift+×で削除)</small></h2>
+        <div class="fav-grid" id="favGrid"></div>
+
+        <h2>ニュース <span style="font-size:12px; font-weight:400; color:var(--accent); cursor:pointer;" onclick="fetchNews()">更新 ↻</span></h2>
+        <div class="section-card"><div id="newsList"><div style="padding:10px; color:#888;">読み込み中...</div></div></div>
+
+        <h2>履歴 <span style="font-size:12px; color:var(--danger); cursor:pointer;" onclick="clearHistory()">消去</span></h2>
+        <div class="section-card" id="historyList"></div>
+    </div>
+
+    <div class="modal-overlay" id="addModal"><div class="modal"><h3>サイトを追加</h3><input type="text" id="siteName" placeholder="名前"><input type="url" id="siteUrl" placeholder="URL"><div style="display:flex; justify-content:flex-end; gap:10px;"><button class="btn" onclick="closeModal('addModal')">キャンセル</button><button class="btn" style="background:var(--accent); color:white;" onclick="saveSite()">追加</button></div></div></div>
+    <div class="modal-overlay" id="settingsModal"><div class="modal"><h3>設定</h3><label>検索エンジン</label><select id="engineSelect"><option value="google">Google</option><option value="yahoo">Yahoo!</option><option value="bing">Bing</option></select><label>背景画像URL</label><input type="text" id="bgUrlInput"><div style="display:flex; justify-content:flex-end; gap:10px;"><button class="btn" onclick="closeModal('settingsModal')">キャンセル</button><button class="btn" style="background:var(--accent); color:white;" onclick="saveSettings()">保存</button></div></div></div>
+
+    <script>
+        const STORE = { config: 'safari_cfg_v4', favs: 'safari_fav_v4', hist: 'safari_his_v4' };
+        let favorites = JSON.parse(localStorage.getItem(STORE.favs)) || [{ name: "Google", url: "https://google.com" }];
+        let history = JSON.parse(localStorage.getItem(STORE.hist)) || [];
+        let config = JSON.parse(localStorage.getItem(STORE.config)) || { engine: 'google', bg: '' };
+
+        function applySettings() {
+            const engines = { google: 'https://www.google.com/search', yahoo: 'https://search.yahoo.co.jp/search', bing: 'https://www.bing.com/search' };
+            const params = { google: 'q', yahoo: 'p', bing: 'q' };
+            document.getElementById('searchForm').action = engines[config.engine] || engines.google;
+            document.getElementById('searchInput').name = params[config.engine] || 'q';
+            if(config.bg) document.body.style.backgroundImage = `url('${config.bg}')`;
+            document.getElementById('engineSelect').value = config.engine;
+            document.getElementById('bgUrlInput').value = config.bg;
+        }
+
+        async function fetchNews() {
+            const listEl = document.getElementById('newsList');
+            try {
+                const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://news.yahoo.co.jp/rss/topics/top-picks.xml')}&_=${Date.now()}`);
+                const data = await res.json();
+                const items = new DOMParser().parseFromString(data.contents, "text/xml").querySelectorAll("item");
+                let html = '';
+                for(let i=0; i<5; i++) {
+                    if(!items[i]) break;
+                    html += `<div class="list-item"><a href="${items[i].querySelector("link").textContent}" target="_blank" class="list-link">${items[i].querySelector("title").textContent}</a></div>`;
+                }
+                listEl.innerHTML = html || 'ニュースがありません';
+            } catch (e) { listEl.innerHTML = '<div style="padding:10px;">取得失敗。再読み込みしてください。</div>'; }
+        }
+
+        function renderFavs() {
+            const grid = document.getElementById('favGrid');
+            grid.innerHTML = '';
+            favorites.forEach((s, i) => {
+                const div = document.createElement('div');
+                div.className = 'fav-item';
+                div.draggable = true;
+                div.innerHTML = `
+                    <div class="fav-icon-box" onclick="window.open('${s.url}','_blank');addHist('${s.name}','${s.url}')" style="pointer-events:auto; cursor:pointer;">
+                        <img src="https://www.google.com/s2/favicons?domain=${s.url}&sz=128">
+                    </div>
+                    <div class="fav-label">${s.name}</div>
+                    <button class="del-btn" onclick="tryDel(event, ${i})">×</button>
+                `;
+                div.ondragstart = (e) => { e.dataTransfer.setData('idx', i); div.classList.add('dragging'); };
+                div.ondragend = () => div.classList.remove('dragging');
+                div.ondragover = (e) => e.preventDefault();
+                div.ondrop = (e) => {
+                    const from = e.dataTransfer.getData('idx');
+                    const target = favorites.splice(from, 1)[0];
+                    favorites.splice(i, 0, target);
+                    saveFavs();
+                };
+                grid.appendChild(div);
+            });
+            const add = document.createElement('div');
+            add.className = 'add-item';
+            add.innerHTML = `<div class="fav-icon-box" onclick="openModal('addModal')" style="pointer-events:auto; font-size:26px;">＋</div><div class="fav-label">追加</div>`;
+            grid.appendChild(add);
+        }
+
+        function tryDel(e, i) {
+            if (e.shiftKey) {
+                favorites.splice(i, 1);
+                saveFavs();
+            } else {
+                alert("Shiftキーを押しながらクリックして削除してください。");
+            }
+        }
+
+        function addHist(name, url) {
+            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            history.unshift({name, url, time});
+            if(history.length > 10) history.pop();
+            localStorage.setItem(STORE.hist, JSON.stringify(history));
+            renderHist();
+        }
+
+        function renderHist() {
+            const el = document.getElementById('historyList');
+            el.innerHTML = history.length ? history.slice(0,5).map(h => `<div class="list-item"><a href="${h.url}" target="_blank" class="list-link">${h.name} <small style="color:#999">${h.time}</small></a></div>`).join('') : '<div style="padding:10px; color:#888;">履歴なし</div>';
+        }
+
+        function saveFavs() { localStorage.setItem(STORE.favs, JSON.stringify(favorites)); renderFavs(); }
+        function saveSite() {
+            const n = document.getElementById('siteName').value, u = document.getElementById('siteUrl').value;
+            if(n && u) { favorites.push({name:n, url: u.startsWith('http') ? u : 'https://'+u}); saveFavs(); closeModal('addModal'); }
+        }
+        function saveSettings() {
+            config.engine = document.getElementById('engineSelect').value;
+            config.bg = document.getElementById('bgUrlInput').value;
+            localStorage.setItem(STORE.config, JSON.stringify(config));
+            applySettings(); closeModal('settingsModal');
+        }
+
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        function clearHistory() { history = []; localStorage.setItem(STORE.hist, JSON.stringify(history)); renderHist(); }
+
+        applySettings(); renderFavs(); renderHist(); fetchNews();
+    </script>
+</body>
+</html>
